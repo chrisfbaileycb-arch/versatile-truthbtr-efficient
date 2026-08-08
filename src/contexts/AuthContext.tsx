@@ -23,7 +23,10 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
   recordScan: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /** Adds (or subtracts, when negative) recovered spend on the profiles row. */
+  addRealizedSavings: (delta: number) => Promise<void>;
 }
+
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -125,6 +128,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .eq('id', session.user.id);
   }, [session, profile]);
 
+  const addRealizedSavings = useCallback(
+    async (delta: number) => {
+      if (!session?.user || !profile || !Number.isFinite(delta) || delta === 0) return;
+      const next = Math.max(0, Number(profile.realized_savings ?? 0) + delta);
+      setProfile({ ...profile, realized_savings: next });
+      await supabase
+        .from('profiles')
+        .update({ realized_savings: next, updated_at: new Date().toISOString() })
+        .eq('id', session.user.id);
+    },
+    [session, profile],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -135,9 +151,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signOut,
       recordScan,
       refreshProfile,
+      addRealizedSavings,
     }),
-    [session, profile, loading, signInWithMagicLink, signOut, recordScan, refreshProfile],
+    [
+      session,
+      profile,
+      loading,
+      signInWithMagicLink,
+      signOut,
+      recordScan,
+      refreshProfile,
+      addRealizedSavings,
+    ],
   );
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

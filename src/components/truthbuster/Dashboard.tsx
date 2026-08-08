@@ -1,5 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Download, SlidersHorizontal, Users, User, AlertTriangle } from 'lucide-react';
+import {
+  Search,
+  Download,
+  SlidersHorizontal,
+  Users,
+  User,
+  AlertTriangle,
+  Database,
+  FlaskConical,
+  Loader2,
+} from 'lucide-react';
 import {
   Anomaly,
   ANOMALY_TYPES,
@@ -73,20 +83,37 @@ const Stat: React.FC<{ label: string; value: string; hint?: string; tone?: 'defa
 interface Props {
   anomalies: Anomaly[];
   onOpen: (a: Anomaly) => void;
+  /** True while the signed-in user's saved findings are being fetched. */
+  loading?: boolean;
+  /** True when `anomalies` came from the database rather than sample data. */
+  isLiveData?: boolean;
+  /** Running total stored on the profile row; falls back to the derived sum. */
+  realizedSavings?: number;
+  onNavigate?: (href: string) => void;
 }
 
-const Dashboard: React.FC<Props> = ({ anomalies, onOpen }) => {
+const Dashboard: React.FC<Props> = ({
+  anomalies,
+  onOpen,
+  loading = false,
+  isLiveData = false,
+  realizedSavings: profileSavings,
+  onNavigate,
+}) => {
   const [mode, setMode] = useState<Mode>('individual');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   const visible = useMemo(() => filterAnomalies(anomalies, filters), [anomalies, filters]);
   const score = useMemo(() => healthScore(anomalies), [anomalies]);
   const exposure = useMemo(() => totalExposure(anomalies), [anomalies]);
-  const recovered = useMemo(() => realizedSavings(anomalies), [anomalies]);
+  const derivedRecovered = useMemo(() => realizedSavings(anomalies), [anomalies]);
+  const recovered =
+    isLiveData && typeof profileSavings === 'number' ? profileSavings : derivedRecovered;
   const criticals = anomalies.filter((a) => a.status === 'open' && a.severity === 'high').length;
 
   const set = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     setFilters((f) => ({ ...f, [key]: value }));
+
 
   const exportCsv = () => {
     const blob = new Blob([toCsv(visible)], { type: 'text/csv;charset=utf-8;' });
@@ -148,7 +175,33 @@ const Dashboard: React.FC<Props> = ({ anomalies, onOpen }) => {
 
         {mode === 'individual' ? (
           <div id="panel-individual" role="tabpanel" aria-labelledby="tab-individual" className="mt-8">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <p
+              role="status"
+              className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${
+                isLiveData
+                  ? 'border-teal-300 bg-teal-50 text-teal-900'
+                  : 'border-slate-300 bg-white text-slate-700'
+              }`}
+            >
+              {loading ? (
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : isLiveData ? (
+                <Database className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              ) : (
+                <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              )}
+              <span>
+                {loading
+                  ? 'Loading your saved findings…'
+                  : isLiveData
+                    ? `Live data — ${anomalies.length} finding${
+                        anomalies.length === 1 ? '' : 's'
+                      } saved to your account. Every scan you run is stored here.`
+                    : 'Sample data. Sign in and run a scan to build your own audit history.'}
+              </span>
+            </p>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:col-span-2 lg:col-span-1">
                 <HealthRing score={score} />
               </div>
@@ -158,7 +211,11 @@ const Dashboard: React.FC<Props> = ({ anomalies, onOpen }) => {
                 hint="Recoverable if every open flag is resolved"
                 tone="alert"
               />
-              <Stat label="Recovered to date" value={currency(recovered)} hint="Confirmed credits & refunds" />
+              <Stat
+                label="Recovered to date"
+                value={currency(recovered)}
+                hint={isLiveData ? 'Saved on your profile' : 'Confirmed credits & refunds'}
+              />
               <Stat
                 label="Critical flags"
                 value={String(criticals)}
@@ -166,6 +223,7 @@ const Dashboard: React.FC<Props> = ({ anomalies, onOpen }) => {
                 tone={criticals > 0 ? 'alert' : 'default'}
               />
             </div>
+
 
             <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -282,15 +340,29 @@ const Dashboard: React.FC<Props> = ({ anomalies, onOpen }) => {
             {visible.length === 0 ? (
               <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
                 <AlertTriangle className="mx-auto h-10 w-10 text-slate-300" aria-hidden="true" />
-                <p className="mt-3 font-medium text-slate-900">No findings match those filters</p>
+                <p className="mt-3 font-medium text-slate-900">
+                  {isLiveData && anomalies.length === 0
+                    ? 'No saved findings yet'
+                    : 'No findings match those filters'}
+                </p>
+                <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+                  {isLiveData && anomalies.length === 0
+                    ? 'Run your first audit — every flag the detectors raise is stored on your account, permanently.'
+                    : 'Try widening the status, type or severity filters.'}
+                </p>
                 <button
                   type="button"
-                  onClick={() => setFilters(DEFAULT_FILTERS)}
-                  className="mt-3 min-h-[44px] rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2"
+                  onClick={
+                    isLiveData && anomalies.length === 0
+                      ? () => onNavigate?.('#scan')
+                      : () => setFilters(DEFAULT_FILTERS)
+                  }
+                  className="mt-4 min-h-[44px] rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2"
                 >
-                  Clear filters
+                  {isLiveData && anomalies.length === 0 ? 'Audit a bill' : 'Clear filters'}
                 </button>
               </div>
+
             ) : (
               <ul className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {visible.map((a) => (

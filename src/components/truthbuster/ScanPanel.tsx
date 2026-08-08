@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Upload, FileText, AlertCircle, CheckCircle2, Camera, Inbox, Lock } from 'lucide-react';
-import { AI_DISCLOSURE, ANOMALY_TYPE_MAP, IDS, Severity, PLAN_MAP } from '@/data/truthbuster';
+import { Loader2, Upload, FileText, AlertCircle, CheckCircle2, Camera, Inbox, Lock, Database } from 'lucide-react';
+import { AI_DISCLOSURE, ANOMALY_TYPE_MAP, IDS, Severity, PLAN_MAP, SourceKind } from '@/data/truthbuster';
 import { canScan, currency, percent, scansRemaining } from '@/lib/anomaly';
 import { useAuth } from '@/contexts/AuthContext';
+import { AnalyzedDocument, saveScanResult } from '@/lib/documents';
 
 
 interface LiveAnomaly {
@@ -40,9 +41,11 @@ Card ending 4417 posted $2,384.10 on Aug 2, 2026.`;
 
 interface ScanPanelProps {
   onRequireSignIn: () => void;
+  /** Fired after a result has been persisted so the dashboard can refresh. */
+  onSaved?: () => void;
 }
 
-const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
+const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn, onSaved }) => {
   const { user, profile, recordScan } = useAuth();
   const plan = profile?.plan ?? 'free';
   const used = profile?.scans_used ?? 0;
@@ -52,10 +55,15 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
   const [fileName, setFileName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [saveNote, setSaveNote] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const run = async (payload: Record<string, unknown>) => {
+  const run = async (
+    payload: Record<string, unknown>,
+    source: SourceKind,
+    originalName?: string,
+  ) => {
     if (quotaReached) {
       setError(
         `You've used all ${PLAN_MAP[plan].scansPerMonth} scans on the ${PLAN_MAP[plan].name} plan this month. Upgrade to Pro for unlimited audits.`,
@@ -64,6 +72,7 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
     }
     setLoading(true);
     setError('');
+    setSaveNote('');
     setResult(null);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('analyze-document', {
@@ -73,8 +82,36 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
       if (!data || (data as { error?: string }).error) {
         throw new Error((data as { error?: string })?.error || 'Analysis failed.');
       }
-      setResult(data as Result);
-      if (user) await recordScan();
+      const analyzed = data as Result;
+      setResult(analyzed);
+
+      if (user) {
+        await recordScan();
+        try {
+          const saved = await saveScanResult({
+            userId: user.id,
+            source,
+            fileName: originalName,
+            result: analyzed as unknown as AnalyzedDocument,
+          });
+          setSaveNote(
+            saved.anomalies.length > 0
+              ? `Saved to your account — ${saved.anomalies.length} finding${
+                  saved.anomalies.length === 1 ? '' : 's'
+                } added to your dashboard.`
+              : 'Saved to your account. No findings to add to the dashboard.',
+          );
+          onSaved?.();
+        } catch (saveErr) {
+          setSaveNote(
+            saveErr instanceof Error
+              ? `Analyzed, but saving failed: ${saveErr.message}`
+              : 'Analyzed, but this scan could not be saved.',
+          );
+        }
+      } else {
+        setSaveNote('Sign in to save this audit to your dashboard.');
+      }
     } catch (e) {
       setError(
         e instanceof Error
@@ -93,7 +130,7 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
       setError('Paste the text from a bill, or upload an image of one, to run an audit.');
       return;
     }
-    run({ text });
+    run({ text }, 'pdf');
   };
 
   const onFile = (file?: File) => {
@@ -110,11 +147,12 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = String(reader.result).split(',')[1];
-      run({ imageBase64: base64, mimeType: file.type, fileName: file.name });
+      run({ imageBase64: base64, mimeType: file.type, fileName: file.name }, 'camera', file.name);
     };
     reader.onerror = () => setError('Could not read that file. Please try another image.');
     reader.readAsDataURL(file);
   };
+
 
   return (
     <section
@@ -290,6 +328,13 @@ const ScanPanel: React.FC<ScanPanelProps> = ({ onRequireSignIn }) => {
                     {currency(result.total)}
                   </p>
                 </div>
+
+                {saveNote && (
+                  <p className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+                    <Database className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {saveNote}
+                  </p>
+                )}
 
                 {result.lineItems.length > 0 && (
                   <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200">

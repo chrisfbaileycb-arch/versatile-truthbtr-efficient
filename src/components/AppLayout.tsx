@@ -13,6 +13,7 @@ import AnomalyDetail from '@/components/truthbuster/AnomalyDetail';
 import AuthModal from '@/components/truthbuster/AuthModal';
 import { Anomaly, IDS, SAMPLE_ANOMALIES } from '@/data/truthbuster';
 import { totalExposure } from '@/lib/anomaly';
+import { fetchUserAnomalies, updateAnomalyStatus } from '@/lib/documents';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/components/ui/use-toast';
 
@@ -25,8 +26,9 @@ interface InstallPromptEvent extends Event {
 }
 
 const AppLayout: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, addRealizedSavings } = useAuth();
   const [anomalies, setAnomalies] = useState<Anomaly[]>(SAMPLE_ANOMALIES);
+  const [loadingAnomalies, setLoadingAnomalies] = useState(false);
   const [selected, setSelected] = useState<Anomaly | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -38,6 +40,32 @@ const AppLayout: React.FC = () => {
   useEffect(() => {
     if (user) setAuthOpen(false);
   }, [user]);
+
+  /* --------------------------------------- load the signed-in user's data */
+  const loadAnomalies = useCallback(async () => {
+    if (!user) {
+      setAnomalies(SAMPLE_ANOMALIES);
+      return;
+    }
+    setLoadingAnomalies(true);
+    try {
+      const rows = await fetchUserAnomalies(user.id);
+      setAnomalies(rows);
+    } catch (e) {
+      toast({
+        title: 'Could not load your findings',
+        description: e instanceof Error ? e.message : 'Showing sample data instead.',
+      });
+      setAnomalies(SAMPLE_ANOMALIES);
+    } finally {
+      setLoadingAnomalies(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadAnomalies();
+  }, [loadAnomalies]);
+
 
   /* ------------------------------------------------ PWA install + offline */
   useEffect(() => {
@@ -112,17 +140,56 @@ const AppLayout: React.FC = () => {
     setDetailOpen(true);
   }, []);
 
+  /**
+   * Status changes are optimistic in the UI, then written to the `anomalies`
+   * row. Resolving a flag also rolls its monthly impact into the profile's
+   * realized_savings total (and backs it out again if it is later re-opened
+   * or dismissed).
+   */
   const setStatus = useCallback(
-    (id: string, status: Anomaly['status'], message: string) => {
+    async (id: string, status: Anomaly['status'], message: string) => {
+      const target = anomalies.find((a) => a.id === id);
+      if (!target || target.status === status) {
+        setDetailOpen(false);
+        return;
+      }
+
+      const previous = anomalies;
       setAnomalies((list) => list.map((a) => (a.id === id ? { ...a, status } : a)));
       setDetailOpen(false);
-      toast({ title: message });
+
+      if (!user) {
+        toast({ title: message, description: 'Sign in to keep this change permanently.' });
+        return;
+      }
+
+      try {
+        await updateAnomalyStatus(user.id, id, status);
+
+        // Keep realized savings on the profile in step with resolved flags.
+        const delta =
+          status === 'resolved'
+            ? target.impact
+            : target.status === 'resolved'
+              ? -target.impact
+              : 0;
+        if (delta !== 0) await addRealizedSavings(delta);
+
+        toast({ title: message });
+      } catch (e) {
+        setAnomalies(previous);
+        toast({
+          title: 'Could not save that change',
+          description: e instanceof Error ? e.message : 'Please try again.',
+        });
+      }
     },
-    [],
+    [anomalies, user, addRealizedSavings],
   );
 
   const exposure = useMemo(() => totalExposure(anomalies), [anomalies]);
   const openCount = useMemo(() => anomalies.filter((a) => a.status === 'open').length, [anomalies]);
+
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 antialiased">
@@ -155,13 +222,26 @@ const AppLayout: React.FC = () => {
 
       <main id={IDS.main} tabIndex={-1} className="focus:outline-none">
         <Hero onNavigate={navigate} exposure={exposure} openCount={openCount} />
-        <Dashboard anomalies={anomalies} onOpen={openAnomaly} />
-        <ScanPanel onRequireSignIn={() => setAuthOpen(true)} />
+        <Dashboard
+          anomalies={anomalies}
+          onOpen={openAnomaly}
+          loading={loadingAnomalies}
+          isLiveData={Boolean(user)}
+          realizedSavings={profile?.realized_savings}
+          onNavigate={navigate}
+        />
+        <ScanPanel
+          onRequireSignIn={() => setAuthOpen(true)}
+          onSaved={() => {
+            void loadAnomalies();
+          }}
+        />
         <Detectors anomalies={anomalies} onNavigate={navigate} />
         <Pricing onNavigate={navigate} />
         <FaqSection />
         <TrustLegal />
       </main>
+
 
       <Footer onNavigate={navigate} />
 
