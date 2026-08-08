@@ -1,0 +1,26 @@
+{
+  "name": "Truthbuster — spending anomaly audits",
+  "short_name": "Truthbuster",
+  "description": "Scan invoices and bank statements for price drift, duplicate charges, dormant subscriptions and silent billing changes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B1220",
+  "theme_color": "#0B1220",
+  "categories": ["finance", "productivity", "business"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "https://d64gsuwffb70l.cloudfront.net/6a77637da2adc8595c95bcbf_1786209824743_d5ddd632.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

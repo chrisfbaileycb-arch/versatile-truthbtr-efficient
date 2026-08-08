@@ -92,14 +92,42 @@
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-background text-foreground font-sans dark:bg-background dark:text-foreground;
+  }
+
+  /* Accessibility: always show a visible focus ring for keyboard users. */
+  :focus-visible {
+    outline: 2px solid #0f766e;
+    outline-offset: 2px;
+  }
+
+  /* Respect reduced-motion preferences across the whole app. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   pre, code {
     @apply font-mono;
   }
 }
+
 
 .markdown-editor {
   @apply font-mono text-base leading-relaxed;
