@@ -1,0 +1,6 @@
+{
+  "name": "Truthbuster",
+  "description": "Invoice and bank statement anomaly detector for spending anomalies: price drift, duplicate charges, dormant subscriptions and silent billing changes.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
